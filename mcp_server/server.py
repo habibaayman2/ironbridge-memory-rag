@@ -21,11 +21,7 @@ import validation
 # --------------------------------------------------------------------------
 # Database backend selection -- IRONBRIDGE_DB_ENGINE=sqlite (default) or
 # ------------------------------------------------------------------------
-if os.environ.get("IRONBRIDGE_DB_ENGINE", "sqlite") == "mssql":
-    import db_mssql as db
-else:
-    import db
-
+import db
 
 def _find_policy_dir() -> Path:
     try:
