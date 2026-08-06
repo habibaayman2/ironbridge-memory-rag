@@ -218,3 +218,8 @@ def log_action(conn, actor_id, action, target_id, detail):
         "INSERT INTO AuditLog (ActorID, Action, TargetID, Detail) VALUES (?, ?, ?, ?)",
         (actor_id, action, target_id, detail),
     )
+def list_safety_policies() -> List[Dict[str, Any]]:
+    """Lists all active safety policy records from the database."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM SafetyPolicies").fetchall()
+        return [dict(r) for r in rows]
