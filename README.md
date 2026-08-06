@@ -82,7 +82,7 @@ the request flow) — `Suppliers` isn't used by any tool in this lab
 assistant), `Equipment` backs `track_equipment_availability`, and
 `SafetyPolicies` backs the two resource documents.
 
-Full ERD source: `db/erd.mmd` (Mermaid — paste into
+Full ERD: `db/ERD.png` (Mermaid — paste into
 [mermaid.live](https://mermaid.live) or view directly on GitHub).
 
 Seed data (`db/seed.sql`) deliberately includes edge cases the write
@@ -99,7 +99,7 @@ starting `# === CONCERN: ... ===`.
 
 | Concern | Where | What triggers it |
 |---|---|---|
-| **Capability negotiation** | `server.py: make_init_options()` | Server declares `tools.listChanged=True`; `agent/client.py: CapabilityGate` checks declared capabilities before relying on them |
+| **Capability negotiation** | `server.py: make_init_options()` | Server declares `tools.listChanged=True`; `agent/mcp_client.py: CapabilityGate` checks declared capabilities before relying on them |
 | **Notifications** | `server.py: list_tools()`, `_authenticate_as_approver()` | Session starts able to see read tools + `create_purchase_request`; a successful `authenticate_as_approver` call sets `SESSION["employee"]` and pushes `send_tool_list_changed()` — three approver tools appear, no reconnect |
 | **Elicitation (×2 genuine triggers)** | `server.py: _approve_purchase_request()`, `_reserve_material()` | (1) `EstimatedCost` > $10,000 → confirm the purchase. (2) A reservation that would drop stock below `MinimumStockLevel` → confirm the low-stock release. Independent triggers, independent policy reasons |
 | **Resources** | `server.py: list_resources()/read_resource()`, `mcp_server/policies/*.md` | Material Handling Procedures and Warehouse Safety Regulations are read once via `resources/read`, not re-fetched per question |
@@ -147,7 +147,7 @@ response the client can never send. A capability-aware host should
 check its own configured capabilities before ever offering these tools
 and instead surface "this action requires human confirmation, which
 this client doesn't support" — same idea as `CapabilityGate` in
-`agent/client.py`, extended to gate tool exposure, not just log a
+`agent/mcp_client.py`, extended to gate tool exposure, not just log a
 capability check.
 
 **If a client connects without sampling support:**
@@ -161,7 +161,7 @@ records without the narrative summary.
 - **Auth is a stand-in.** PIN-over-a-tool-call is fine for a lab demo;
   production needs a real identity provider and the HTTP transport's
   bearer-token check replaced with proper session-scoped auth.
-- **Sampling/elicitation callbacks are stand-ins** (`agent/client.py`'s
+- **Sampling/elicitation callbacks are stand-ins** (`agent/mcp_client.py`'s
   `fake_model_reply` and the `input()`-based confirmation) — a real host
   app wires these to an actual model and an actual UI.
 - **Single in-process session state.** `SESSION` in `server.py` is a
