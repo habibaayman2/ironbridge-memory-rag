@@ -126,12 +126,23 @@ def hybrid_rag_answer(query: str, top_k: int = 5) -> dict:
 
 
 if __name__ == "__main__":
-   if __name__ == "__main__":
-    test_query = "What does IronBridge Safety Policy #1 cover?"
-    result = hybrid_rag_answer(test_query)
-    print(f"\nQuery: {result['query']}")
-    print(f"\nAnswer:\n{result['answer']}")
-    print(f"\nGrounded in {len(result['retrieved_chunks'])} chunks:")
-    for c in result["retrieved_chunks"]:
-        print(f"  - combined={c['combined_score']:.3f} (vector={c['vector_score']:.3f}, bm25={c['bm25_score']:.3f})")
-        print(f"    {c['text'][:80]}...")
+    test_query = (
+        "For a reservation that would breach minimum stock on Reinforcement "
+        "Steel, what handling requirements apply and what does the approval "
+        "workflow require?"
+    )
+
+    print("=" * 70)
+    print("Diagnostic: does a single hybrid search call answer both parts")
+    print("of a multi-part question, or does it need a narrower top_k to")
+    print("expose the limit? (This motivates Agentic RAG's multi-hop loop.)")
+    print("=" * 70)
+
+    for k in (5, 3):
+        print(f"\n--- top_k={k} ---")
+        result = hybrid_rag_answer(test_query, top_k=k)
+        print(f"Answer:\n{result['answer']}")
+        print(f"\nGrounded in {len(result['retrieved_chunks'])} chunks:")
+        for c in result["retrieved_chunks"]:
+            print(f"  - combined={c['combined_score']:.3f} (vector={c['vector_score']:.3f}, bm25={c['bm25_score']:.3f})")
+            print(f"    {c['text'][:80]}...")
