@@ -40,10 +40,18 @@ sys.path.insert(0, os.path.dirname(__file__))
 import mcp_client
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO_ROOT)  # so `import memory` works regardless of cwd
 load_dotenv(os.path.join(REPO_ROOT, ".env"))  # picks up GROQ_API_KEY,
                                                 # IRONBRIDGE_MCP_URL, etc. if
                                                 # a .env file exists there;
                                                 # no-op otherwise.
+
+import uuid
+from memory.short_term import SessionMemory
+from memory.router import PromoteOrDropRouter
+from memory.stores import EpisodicStore, SemanticStore
+from memory.consolidation import ConsolidationJob
+from memory.self_rag_check import SelfRAGChecker
 
 MODEL = "llama-3.3-70b-versatile"
 
@@ -79,6 +87,19 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
 
     from groq import Groq
     groq_client = Groq(api_key=api_key)
+
+    # === CONCERN: memory system (see memory/) ===
+    session_id = str(uuid.uuid4())
+    episodic_store = EpisodicStore()
+    semantic_store = SemanticStore()
+    router = PromoteOrDropRouter(episodic_store)
+    checker = SelfRAGChecker()
+    session_mem = SessionMemory(session_id, max_turns=20)
+
+    # Separate, periodic pass over episodic memory -- NOT triggered by the
+    # router above. Startup is fine for this single-process interactive
+    # agent; swap for a real scheduler in a deployed setting.
+    ConsolidationJob(episodic_store, semantic_store).run()
 
     state = {"groq_tools": []}
 
@@ -130,6 +151,25 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                 break
 
             conversation.append({"role": "user", "content": user_text})
+            session_mem.scratchpad.update(
+                plan=f"respond to: {user_text[:80]}",
+                sub_goal="awaiting model response / tool calls",
+            )
+            evicted = session_mem.add_turn("user", user_text)
+            if evicted:
+                router.route(evicted)
+
+            # Surface scratchpad + relevant recalled memory to the model.
+            # Placed here (recomputed each inner-loop turn) so it still
+            # reflects the latest scratchpad state after any tool calls
+            # below update working_state. Self-RAG-style checked before
+            # injection -- an irrelevant recalled memory is dropped, not
+            # silently included.
+            recalled = [e.content for e in episodic_store.recall(session_id=session_id)]
+            recalled = checker.filter_relevant(user_text, recalled)
+            memory_msg = {"role": "system", "content": session_mem.scratchpad.as_context_block()}
+            if recalled:
+                memory_msg["content"] += "\n[RELEVANT MEMORY]\n" + "\n".join(f"- {r}" for r in recalled)
 
             # Loop until the model stops asking for tool calls.
             while True:
@@ -137,7 +177,7 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                     model=MODEL,
                     max_tokens=1024,
                     tools=state["groq_tools"],
-                    messages=conversation,
+                    messages=conversation + [memory_msg],
                 )
 
                 message = response.choices[0].message
@@ -162,6 +202,10 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                         for tc in message.tool_calls
                     ]
                 conversation.append(assistant_msg)
+                if message.content:
+                    evicted = session_mem.add_turn("assistant", message.content)
+                    if evicted:
+                        router.route(evicted)
 
                 if not message.tool_calls:
                     if message.content:
@@ -181,6 +225,17 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                             "content": text,
                         }
                     )
+                    session_mem.scratchpad.update(
+                        sub_goal=f"just called {tc.function.name}",
+                        last_tool=tc.function.name,
+                    )
+                    tool_project_id = args.get("project_id")  # best-effort;
+                    # None if this particular tool call didn't take one
+                    evicted = session_mem.add_turn(
+                        "tool", text, project_id=str(tool_project_id) if tool_project_id is not None else None,
+                    )
+                    if evicted:
+                        router.route(evicted)
                 # loop again so the model can react to the tool result(s)
 
 

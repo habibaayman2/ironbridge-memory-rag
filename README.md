@@ -175,3 +175,58 @@ records without the narrative summary.
   store, wire `Suppliers` into a real reorder-suggestion tool, and add a
   `subscribe`d resource for live budget status instead of polling
   `view_project_budget`.
+
+---
+
+# Memory & RAG Lab — extending the assistant above
+
+This section covers the second lab: giving the same agent long-term
+memory and grounded retrieval over documents it can't reach through a
+tool call. See `memory/`, `context_eval/`, `rag/`, and `retrieval_eval/`
+for the implementations; this section is the shared problem-framing
+writeup, one subsection per person.
+
+## Why persistent memory is a real gap for IronBridge (Person 1)
+
+The MCP server above already lets staff check inventory, budgets, and
+equipment in real time — but every one of those tool calls happens
+inside a session that starts from nothing and ends with nothing kept.
+In practice that means:
+
+- A site engineer re-explains the same recurring problem — e.g. that
+  **Reinforcement Steel 12mm (MaterialID 2)** keeps running below
+  `MinimumStockLevel` on Project 1 — every time they open a new session,
+  because the assistant has no memory of having heard it before.
+- A Project Manager's standing preference (e.g. "escalate early, don't
+  wait for the deadline") has to be repeated to the assistant on every
+  approval-adjacent conversation, because nothing about *how this PM
+  likes to work* survives past the current connection.
+- A supplier's behavior changes over time — **Ironbridge Steel Yard**
+  quoting a longer lead time after a fleet change, for example — and
+  without a place to store that as a fact with a date and a version,
+  the assistant either has no answer or, worse, keeps repeating a
+  now-wrong number with no way to know it went stale.
+
+None of this is a toy need: forgetting the low-stock pattern means a
+site engineer keeps hitting the same wall every session; treating a
+changed supplier fact as unchanging means an approval decision gets
+made on stale information with no record that it *was* stale. That's
+the justification for `memory/`'s scope — a real short-term
+buffer + scratchpad (so pruning never wipes what the agent is mid-way
+through), a promote-or-drop router with logged reasoning (so what
+survives a session boundary is a deliberate decision, not an accident),
+and a consolidation layer that versions and dates facts instead of
+silently overwriting them when they change. Full mapping of each
+concern to its file is in `memory/README.md`.
+
+## Why context management matters given IronBridge's real call shape (Person 2)
+
+*TODO — Person 2 to fill in, covering `context_eval/`'s four strategies
+and why the chosen one fits IronBridge's actual conversation shape.*
+
+## Why the policy corpus is a genuine retrieval problem, not a lookup problem (Person 3)
+
+*TODO — Person 3 to fill in, covering `rag/`'s three retrieval
+architectures and why the policy documents need real retrieval rather
+than being turned into more tools.*
+
