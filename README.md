@@ -82,7 +82,7 @@ the request flow) — `Suppliers` isn't used by any tool in this lab
 assistant), `Equipment` backs `track_equipment_availability`, and
 `SafetyPolicies` backs the two resource documents.
 
-Full ERD source: `db/erd.mmd` (Mermaid — paste into
+Full ERD: `db/ERD.png` (Mermaid — paste into
 [mermaid.live](https://mermaid.live) or view directly on GitHub).
 
 Seed data (`db/seed.sql`) deliberately includes edge cases the write
@@ -99,10 +99,10 @@ starting `# === CONCERN: ... ===`.
 
 | Concern | Where | What triggers it |
 |---|---|---|
-| **Capability negotiation** | `server.py: make_init_options()` | Server declares `tools.listChanged=True`; `agent/client.py: CapabilityGate` checks declared capabilities before relying on them |
+| **Capability negotiation** | `server.py: make_init_options()` | Server declares `tools.listChanged=True`; `agent/mcp_client.py: CapabilityGate` checks declared capabilities before relying on them |
 | **Notifications** | `server.py: list_tools()`, `_authenticate_as_approver()` | Session starts able to see read tools + `create_purchase_request`; a successful `authenticate_as_approver` call sets `SESSION["employee"]` and pushes `send_tool_list_changed()` — three approver tools appear, no reconnect |
 | **Elicitation (×2 genuine triggers)** | `server.py: _approve_purchase_request()`, `_reserve_material()` | (1) `EstimatedCost` > $10,000 → confirm the purchase. (2) A reservation that would drop stock below `MinimumStockLevel` → confirm the low-stock release. Independent triggers, independent policy reasons |
-| **Resources** | `server.py: list_resources()/read_resource()`, `mcp_server/policies/*.md` | Material Handling Procedures and Warehouse Safety Regulations are read once via `resources/read`, not re-fetched per question |
+| **Resources** | `server.py: list_resources()/read_resource()`, `mcp_server/policies/*.md` | Material Handling Procedures, Warehouse Safety Regulations, and Equipment Operation Safety Rules are read once via `resources/read`, not re-fetched per question |
 | **Prompts** | `server.py: list_prompts()/get_prompt()` | `draft_purchase_justification` — parameterized starting point every site engineer needs before submitting an expensive request |
 | **Transport** | `server.py: main()`, `mcp_server/http_app.py` | `TRANSPORT=stdio` (dev) vs `TRANSPORT=http` (Streamable HTTP, production) — same server code either way |
 | **Progress tracking** | `server.py: _generate_procurement_report()` | Iterates every purchase request in a date range, sending `send_progress_notification` after each, before the sampling call even starts |
@@ -147,7 +147,7 @@ response the client can never send. A capability-aware host should
 check its own configured capabilities before ever offering these tools
 and instead surface "this action requires human confirmation, which
 this client doesn't support" — same idea as `CapabilityGate` in
-`agent/client.py`, extended to gate tool exposure, not just log a
+`agent/mcp_client.py`, extended to gate tool exposure, not just log a
 capability check.
 
 **If a client connects without sampling support:**
@@ -161,7 +161,7 @@ records without the narrative summary.
 - **Auth is a stand-in.** PIN-over-a-tool-call is fine for a lab demo;
   production needs a real identity provider and the HTTP transport's
   bearer-token check replaced with proper session-scoped auth.
-- **Sampling/elicitation callbacks are stand-ins** (`agent/client.py`'s
+- **Sampling/elicitation callbacks are stand-ins** (`agent/mcp_client.py`'s
   `fake_model_reply` and the `input()`-based confirmation) — a real host
   app wires these to an actual model and an actual UI.
 - **Single in-process session state.** `SESSION` in `server.py` is a
@@ -175,3 +175,58 @@ records without the narrative summary.
   store, wire `Suppliers` into a real reorder-suggestion tool, and add a
   `subscribe`d resource for live budget status instead of polling
   `view_project_budget`.
+
+---
+
+# Memory & RAG Lab — extending the assistant above
+
+This section covers the second lab: giving the same agent long-term
+memory and grounded retrieval over documents it can't reach through a
+tool call. See `memory/`, `context_eval/`, `rag/`, and `retrieval_eval/`
+for the implementations; this section is the shared problem-framing
+writeup, one subsection per person.
+
+## Why persistent memory is a real gap for IronBridge (Person 1)
+
+The MCP server above already lets staff check inventory, budgets, and
+equipment in real time — but every one of those tool calls happens
+inside a session that starts from nothing and ends with nothing kept.
+In practice that means:
+
+- A site engineer re-explains the same recurring problem — e.g. that
+  **Reinforcement Steel 12mm (MaterialID 2)** keeps running below
+  `MinimumStockLevel` on Project 1 — every time they open a new session,
+  because the assistant has no memory of having heard it before.
+- A Project Manager's standing preference (e.g. "escalate early, don't
+  wait for the deadline") has to be repeated to the assistant on every
+  approval-adjacent conversation, because nothing about *how this PM
+  likes to work* survives past the current connection.
+- A supplier's behavior changes over time — **Ironbridge Steel Yard**
+  quoting a longer lead time after a fleet change, for example — and
+  without a place to store that as a fact with a date and a version,
+  the assistant either has no answer or, worse, keeps repeating a
+  now-wrong number with no way to know it went stale.
+
+None of this is a toy need: forgetting the low-stock pattern means a
+site engineer keeps hitting the same wall every session; treating a
+changed supplier fact as unchanging means an approval decision gets
+made on stale information with no record that it *was* stale. That's
+the justification for `memory/`'s scope — a real short-term
+buffer + scratchpad (so pruning never wipes what the agent is mid-way
+through), a promote-or-drop router with logged reasoning (so what
+survives a session boundary is a deliberate decision, not an accident),
+and a consolidation layer that versions and dates facts instead of
+silently overwriting them when they change. Full mapping of each
+concern to its file is in `memory/README.md`.
+
+## Why context management matters given IronBridge's real call shape (Person 2)
+
+*TODO — Person 2 to fill in, covering `context_eval/`'s four strategies
+and why the chosen one fits IronBridge's actual conversation shape.*
+
+## Why the policy corpus is a genuine retrieval problem, not a lookup problem (Person 3)
+
+*TODO — Person 3 to fill in, covering `rag/`'s three retrieval
+architectures and why the policy documents need real retrieval rather
+than being turned into more tools.*
+

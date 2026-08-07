@@ -361,6 +361,11 @@ def material_handling_policy() -> str:
 def warehouse_safety_policy() -> str:
     return (POLICY_DIR / "warehouse_safety_regulations.md").read_text()
 
+@mcp.resource("policy://equipment-operation", name="Equipment Operation Safety Rules", mime_type="text/markdown")
+def equipment_operation_policy() -> str:
+    return (POLICY_DIR / "equipment_operation_safety_rules.md").read_text()
+
+
 
 # ==========================================================================
 # === CONCERN: Prompts ======================================================
