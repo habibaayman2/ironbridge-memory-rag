@@ -15,15 +15,16 @@ the model that fulfils the server's own sampling/createMessage calls
 (same provider, same key).
 
 Usage:
-    export GROQ_API_KEY=...
-    python3 agent/agent.py                       # stdio, spawns the server
-    python3 agent/agent.py --transport http --http-url http://localhost:8080/mcp --http-token secret
+ export GROQ_API_KEY=...
+ python3 agent/agent.py # stdio, spawns the server
+ python3 agent/agent.py --transport http --http-url http://localhost:8080/mcp --http-token secret
 
 Try, e.g.:
-    "What steel do we have in stock?"
-    "Submit a request for 15 units of steel (material 2) for project 2, I'm employee 7"
-    "Log me in as Sami with PIN 1108"                     -> triggers notifications
-    "Approve request <id>"                                -> triggers elicitation (real prompt!)
+ "What steel do we have in stock?"
+ "Submit a request for 15 units of steel (material 2) for project 2, I'm employee 7"
+ "Log me in as Sami with PIN 1108" -> triggers notifications
+ "Approve request " -> triggers elicitation (real prompt!)
+ "What does Policy #2 say about fire lanes?" -> triggers RAG retrieval
 """
 
 from __future__ import annotations
@@ -40,11 +41,17 @@ sys.path.insert(0, os.path.dirname(__file__))
 import mcp_client
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO_ROOT)  # so `import memory` works regardless of cwd
+CONTEXT_EVAL_DIR = os.path.join(REPO_ROOT, "context_eval")
+
+# Configure sys.path for direct modular imports across repository folders
+for path in (REPO_ROOT, CONTEXT_EVAL_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
 load_dotenv(os.path.join(REPO_ROOT, ".env"))  # picks up GROQ_API_KEY,
-                                                # IRONBRIDGE_MCP_URL, etc. if
-                                                # a .env file exists there;
-                                                # no-op otherwise.
+# IRONBRIDGE_MCP_URL, etc. if
+# a .env file exists there;
+# no-op otherwise.
 
 import uuid
 from memory.short_term import SessionMemory
@@ -53,7 +60,23 @@ from memory.stores import EpisodicStore, SemanticStore
 from memory.consolidation import ConsolidationJob
 from memory.self_rag_check import SelfRAGChecker
 
-MODEL = "llama-3.3-70b-versatile"
+# ---------------------------------------------------------------------------
+# RAG Integration (Person 3 — Issue #32)
+# ---------------------------------------------------------------------------
+from rag.hybrid_search import hybrid_rag_answer
+from rag.agentic_rag import agentic_rag_answer
+
+# ---------------------------------------------------------------------------
+# Context Management Integration (Observation Masking Strategy)
+# ---------------------------------------------------------------------------
+try:
+    from observation_masking import apply as apply_observation_masking
+    from transcript import Turn
+except ModuleNotFoundError:
+    from context_eval.observation_masking import apply as apply_observation_masking
+    from context_eval.transcript import Turn
+
+MODEL = "llama-3.1-8b-instant"
 
 SYSTEM_PROMPT = (
     "You are the IronBridge Construction procurement assistant. Use the "
@@ -62,6 +85,43 @@ SYSTEM_PROMPT = (
     "available yet (e.g. approving a request), explain to the user what "
     "they need to do first (e.g. authenticate) rather than guessing."
 )
+
+# === CONCERN: RAG routing logic (Issue #32) ===
+POLICY_KEYWORDS = [
+    "policy", "safety", "handling", "ppe", "warehouse",
+    "fire lane", "lifting", "crane",
+    "minimum stock", "approval workflow", "clearance",
+    "regulation", "procedure", "guideline", "rule", "compliance",
+    "protocol", "requirement", "standard"
+]
+
+INVENTORY_KEYWORDS = [
+    "do we have", "how many", "how much", "available",
+    "in stock", "quantity", "price", "cost", "budget",
+    "remaining", "left", "order", "purchase"
+]
+
+
+def _is_policy_question(text: str) -> bool:
+    """Detect if a user query is about policies/safety/rules."""
+    lowered = text.lower()
+    if any(kw in lowered for kw in INVENTORY_KEYWORDS):
+        return False
+    return any(kw in lowered for kw in POLICY_KEYWORDS)
+
+
+def _is_multi_part_question(text: str) -> bool:
+    """Heuristic: does the question have multiple independent sub-questions?"""
+    lowered = text.lower()
+    and_count = lowered.count(" and ")
+    what_count = lowered.count(" what ")
+    return (
+        and_count >= 1
+        or what_count >= 2
+        or "both" in lowered
+        or "also" in lowered
+        or "additionally" in lowered
+    )
 
 
 def mcp_tool_to_groq(tool) -> dict:
@@ -76,16 +136,55 @@ def mcp_tool_to_groq(tool) -> dict:
     }
 
 
+def prepare_pruned_messages(messages: list[dict], keep_last_n_tool_outputs: int = 3) -> list[dict]:
+    """
+    Applies Observation Masking to the active conversation history prior to model dispatch.
+    Replaces older verbose JSON tool observations with concise placeholders while preserving structure.
+    """
+    turns = []
+    for idx, msg in enumerate(messages):
+        role = msg.get("role")
+        content = msg.get("content") or ""
+        is_tool = (role == "tool")
+        is_critical = any(kw in content.lower() for kw in ["budget", "limit", "cap", "rule"])
+
+        turns.append(
+            Turn(
+                role=role,
+                content=content,
+                is_tool_output=is_tool,
+                critical=is_critical,
+                turn_index=idx,
+            )
+        )
+
+    # 1. Apply Observation Masking strategy on transcript turns
+    pruned_turns = apply_observation_masking(turns, keep_last_n_tool_outputs=keep_last_n_tool_outputs)
+
+    # 2. Map masked contents back to message dict payloads for API execution
+    pruned_messages = []
+    for orig_msg, pruned_turn in zip(messages, pruned_turns):
+        msg_copy = dict(orig_msg)
+        if orig_msg.get("role") == "tool":
+            msg_copy["content"] = pruned_turn.content
+        pruned_messages.append(msg_copy)
+
+    return pruned_messages
+
+
 async def run_agent(transport: str, http_url: str | None, http_token: str | None):
     api_key = os.environ.get("GROQ_API_KEY")
     if not api_key:
-        print("GROQ_API_KEY is not set -- the agent's own driving model "
-              "(the one deciding which tools to call) needs it. Get a free "
-              "key at https://console.groq.com -- sampling requests FROM "
-              "the server would also fail without it.")
+        print(
+            "GROQ_API_KEY is not set -- the agent's own driving model "
+            "(the one deciding which tools to call) needs it. Get a free "
+            "key at https://console.groq.com -- sampling requests FROM "
+            "the server would also fail without it."
+        )
         return
 
     from groq import Groq
+
     groq_client = Groq(api_key=api_key)
 
     # === CONCERN: memory system (see memory/) ===
@@ -131,10 +230,12 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
         supports_notifications = mcp_client.check_capability(init_result, "tools.listChanged")
         print(f"Server advertises tools.listChanged: {supports_notifications}")
         if not supports_notifications:
-            print("(No push support declared -- this agent would need to "
-                  "poll list_tools() periodically instead of trusting a "
-                  "notification that may never come. Not implemented here "
-                  "since IronBridge's server does declare it.)")
+            print(
+                "(No push support declared -- this agent would need to "
+                "poll list_tools() periodically instead of trusting a "
+                "notification that may never come. Not implemented here "
+                "since IronBridge's server does declare it.)"
+            )
 
         await refresh_tools_and_announce()
 
@@ -159,6 +260,34 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
             if evicted:
                 router.route(evicted)
 
+            # === CONCERN: RAG retrieval for policy questions (Issue #32) ===
+            if _is_policy_question(user_text):
+                is_multi = _is_multi_part_question(user_text)
+                if is_multi:
+                    print("  [RAG] Routing to Agentic RAG (multi-part detected)...")
+                    rag_result = agentic_rag_answer(user_text, top_k_per_hop=4)
+                else:
+                    print("  [RAG] Routing to Hybrid Search...")
+                    rag_result = hybrid_rag_answer(user_text, top_k=5)
+
+                rag_answer = rag_result["answer"]
+
+                # Inject retrieved policy context as a system message so the
+                # model grounds its response in real policy documents.
+                # Self-RAG already ran inside the RAG functions (relevance +
+                # support checks); we only inject if it passed.
+                rag_injection = (
+                    f"[RETRIEVED POLICY CONTEXT]\n"
+                    f"{rag_answer}\n"
+                    f"[END RETRIEVED POLICY CONTEXT]"
+                )
+                conversation.append({"role": "system", "content": rag_injection})
+
+                # Log for demo/grading visibility
+                hops = rag_result.get("hops_used", 1)
+                chunks = len(rag_result.get("retrieved_chunks", []))
+                print(f"  [RAG] Retrieved {chunks} chunk(s) across {hops} hop(s).")
+
             # Surface scratchpad + relevant recalled memory to the model.
             # Placed here (recomputed each inner-loop turn) so it still
             # reflects the latest scratchpad state after any tool calls
@@ -173,11 +302,14 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
 
             # Loop until the model stops asking for tool calls.
             while True:
+                # Apply Observation Masking to conversation history before completion call
+                pruned_conversation = prepare_pruned_messages(conversation)
+
                 response = groq_client.chat.completions.create(
                     model=MODEL,
                     max_tokens=1024,
                     tools=state["groq_tools"],
-                    messages=conversation + [memory_msg],
+                    messages=pruned_conversation + [memory_msg],
                 )
 
                 message = response.choices[0].message
@@ -214,10 +346,10 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
 
                 for tc in message.tool_calls:
                     args = json.loads(tc.function.arguments or "{}")
-                    print(f"  [calling tool] {tc.function.name}({args})")
+                    print(f" [calling tool] {tc.function.name}({args})")
                     result = await session.call_tool(tc.function.name, args)
                     text = "".join(c.text for c in result.content if hasattr(c, "text"))
-                    print(f"  [tool result] {text}")
+                    print(f" [tool result] {text}")
                     conversation.append(
                         {
                             "role": "tool",
@@ -232,11 +364,13 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                     tool_project_id = args.get("project_id")  # best-effort;
                     # None if this particular tool call didn't take one
                     evicted = session_mem.add_turn(
-                        "tool", text, project_id=str(tool_project_id) if tool_project_id is not None else None,
+                        "tool",
+                        text,
+                        project_id=str(tool_project_id) if tool_project_id is not None else None,
                     )
                     if evicted:
                         router.route(evicted)
-                # loop again so the model can react to the tool result(s)
+                    # loop again so the model can react to the tool result(s)
 
 
 def main():

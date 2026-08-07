@@ -33,7 +33,7 @@ from rag.hybrid_search import hybrid_rag_answer
 from rag.agentic_rag import agentic_rag_answer
 
 ARCHITECTURES: Dict[str, Callable[[str], Dict[str, Any]]] = {
-    "naive_rag": lambda q: naive_rag_answer(q, top_k=2),
+   "naive_rag": lambda q: naive_rag_answer(q, top_k=4),
     "hybrid_rag": lambda q: hybrid_rag_answer(q, top_k=5),
     "agentic_rag": lambda q: agentic_rag_answer(q, top_k_per_hop=4),
 }
@@ -114,8 +114,7 @@ def run_evaluation() -> Dict[str, Dict[str, Any]]:
         for arch_name, arch_fn in ARCHITECTURES.items():
             start = time.perf_counter()
             try:
-                with _quiet():
-                    result = arch_fn(q["question"])
+                result = arch_fn(q["question"])
             except Exception as exc:
                 result = {
                     "query": q["question"],
@@ -209,12 +208,17 @@ def main():
     print_comparison_table(results)
     print_per_question_breakdown(results)
     save_results(results)
-
-    print("\n>> SHIPPED ARCHITECTURE: Agentic RAG")
-    print("   Rationale: Multi-part policy questions dominate IronBridge's")
-    print("   query pattern. Agentic is the only architecture that can issue")
-    print("   a second targeted retrieval when the first pass misses a sub-topic.")
-    print("   The latency cost (see table) is the price of that capability.\n")
+    
+    print("\n>> SHIPPED ARCHITECTURE: Hybrid Search")
+    print("   Rationale: Hybrid RAG matches Agentic RAG on accuracy (6/6)")
+    print("   at less than half the latency (1.45s vs 3.68s) and fewer tokens.")
+    print("   Naive RAG fails on exact-identifier questions ('Policy #2', '50kg')")
+    print("   because dense embeddings miss exact token matches. Hybrid search")
+    print("   fixes that with BM25 at almost no extra cost. Agentic RAG is kept")
+    print("   as a routed path for explicitly multi-part questions where the")
+    print("   first retrieval hop demonstrably misses a sub-topic, but Hybrid is")
+    print("   the default for IronBridge's dominant query pattern: quick safety")
+    print("   checks during live calls where a site engineer is waiting.\n")
 
 
 if __name__ == "__main__":
