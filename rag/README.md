@@ -66,3 +66,10 @@ python rag/test_search.py
 - [x] Agentic RAG
 - [ ] Self-RAG verification (integration with Person 1)
 - [ ] `retrieval_eval/` benchmark and comparison table
+# Naive RAG (Retrieval-Augmented Generation)
+
+A clean, minimalist implementation of Naive RAG designed for quick context retrieval and generation using FastEmbed for local embeddings and vector indexing.
+
+---
+
+## 🏗️ Architecture / Pipeline Flow
