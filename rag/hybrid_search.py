@@ -48,7 +48,7 @@ class HybridRetriever:
         one retrieved by only one.
         """
         # --- Vector search ---
-        vector_hits = self.vector_store.similarity_search_with_score(query, k=top_k)
+        vector_hits = self.vector_store.similarity_search_with_score(query, k=len(self.chunks))
         vector_scores = {}
         for doc, score in vector_hits:
             vector_scores[doc.page_content] = score

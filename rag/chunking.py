@@ -45,10 +45,15 @@ def get_policy_chunks():
             if header_prefix_parts:
                 doc.page_content = f"{' - '.join(header_prefix_parts)}\n\n{doc.page_content}"
             
-            # التقسيم الثاني (للتأكد من الحجم - Recursive)
             final_docs = text_splitter.split_documents([doc])
+
+            # نستبعد الـ chunks القصيرة جدًا (زي سطور metadata بحتة من
+            # غير محتوى فعلي) -- بتديها embeddings مش موثوقة وبتشوّه
+            # الترتيب (لاحظنا chunk من سطرين بس بياخد أعلى vector score)
+            MIN_CHUNK_LENGTH = 40
+            final_docs = [d for d in final_docs if len(d.page_content.strip()) >= MIN_CHUNK_LENGTH]
+
             all_final_chunks.extend(final_docs)
-            
     return all_final_chunks
 
 if __name__ == "__main__":

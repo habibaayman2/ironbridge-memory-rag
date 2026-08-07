@@ -217,4 +217,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-rag/local_qdrant/
+rag/qdrant_data/

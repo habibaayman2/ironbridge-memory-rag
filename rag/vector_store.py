@@ -14,7 +14,8 @@ def setup_vector_store():
     embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
     # 2. إعداد مسار التخزين
-    path = os.path.join(os.path.dirname(__file__), "local_qdrant")
+    path = os.path.join(os.path.dirname(__file__), "qdrant_data")
+
     client = QdrantClient(path=path)
 
     # 3. نتأكد الأول: هل الـ collection موجودة ومليانة بالفعل؟
@@ -31,6 +32,11 @@ def setup_vector_store():
             embedding=embeddings,
         )
         return vector_store
+
+   
+    client.close()
+
+    # 4. أول مرة بس: نجيب الـ chunks ونبنيهم من الصفر
 
     # 4. أول مرة بس: نجيب الـ chunks ونبنيهم من الصفر
     chunks = get_policy_chunks()
