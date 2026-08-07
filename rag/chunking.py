@@ -33,6 +33,17 @@ def get_policy_chunks():
         # إضافة metadata إضافية لكل قطعة (اسم الملف)
         for doc in header_splits:
             doc.metadata["source"] = md_file.name
+
+            # نلزّق عناوين الأقسام في بداية النص نفسه، مش بس في الـ
+            # metadata -- عشان BM25 والـ vector search يقدروا يشوفوا
+            # حاجات زي "Policy #1" اللي بتكون موجودة في العنوان بس
+            header_prefix_parts = []
+            if "Header 1" in doc.metadata:
+                header_prefix_parts.append(doc.metadata["Header 1"])
+            if "Header 2" in doc.metadata:
+                header_prefix_parts.append(doc.metadata["Header 2"])
+            if header_prefix_parts:
+                doc.page_content = f"{' - '.join(header_prefix_parts)}\n\n{doc.page_content}"
             
             # التقسيم الثاني (للتأكد من الحجم - Recursive)
             final_docs = text_splitter.split_documents([doc])
