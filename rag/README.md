@@ -73,3 +73,40 @@ A clean, minimalist implementation of Naive RAG designed for quick context retri
 ---
 
 ## 🏗️ Architecture / Pipeline Flow
+[ Documents ] ──> [ Chunking ] ──> [ Embedding ] ──> [ Vector Store ]
+│
+[ User Query ] ──> [ Embedding ] ──> [ Similarity Search ] ┘
+│
+[ Context + Query ]
+│
+[ LLM ] ──> [ Final Answer ]
+
+
+---
+
+## 🚀 Features
+
+* **FastEmbed Acceleration:** Local, high-performance ONNX embeddings with automatic model caching.
+* **Vector Index Persistence:** Reuses existing collection indices to skip redundant re-embedding.
+* **Self-RAG Grounding Verification:** Includes automated token overlap checks to verify answer accuracy against retrieved context.
+* **Strict Context Grounding:** Formats prompts to ensure responses strictly adhere to retrieved facts.
+
+---
+
+## 📊 Benchmark Results
+
+Below are the execution logs and Self-RAG verification results from a sample query run:
+
+### Execution Output
+
+```text
+Initializing FastEmbed...
+Collection already exists with 11 points -- reusing it, skipping re-embedding.
+[self-rag-check] support_check: passed=True -- answer/content token overlap=0.81 (threshold 0.2); answer appears grounded in content
+
+Query: What are the rules for lifting steel above 50kg?
+
+Answer:
+According to the context, materials in the Steel category require mechanical lifting equipment above 50kg per unit — never manual lift.
+
+Total chunks used: 3
