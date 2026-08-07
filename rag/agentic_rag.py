@@ -23,7 +23,7 @@ from rag.hybrid_search import HybridRetriever
 
 load_dotenv()
 
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 MAX_HOPS = 3  # hard cap so the model can't loop forever
 
 
@@ -98,7 +98,9 @@ def agentic_rag_answer(query: str, top_k_per_hop: int = 4) -> dict:
             "query": parsed["query"],
         })
 
-        
+        if parsed["decision"] == "ANSWER":
+            break
+
         previous_queries = [step["query"] for step in trace[:-1]]
         if parsed["query"] in previous_queries:
             break

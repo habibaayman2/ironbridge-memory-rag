@@ -111,15 +111,19 @@ def _is_policy_question(text: str) -> bool:
 
 
 def _is_multi_part_question(text: str) -> bool:
-    """Heuristic: does the question have multiple independent sub-questions?"""
+    """Heuristic: does the question have multiple independent sub-questions?
+
+    We look for multiple question-starting words (what/how/why/when/where)
+    or explicit multi-part connectors like 'both' / 'additionally'.
+    A single 'and' connecting two nouns (e.g. 'fire exits and pallets')
+    does NOT count as multi-part.
+    """
     lowered = text.lower()
-    and_count = lowered.count(" and ")
-    what_count = lowered.count(" what ")
+    # Count question words that typically start independent clauses
+    question_starts = sum(1 for w in ["what ", "how ", "why ", "when ", "where "] if w in lowered)
     return (
-        and_count >= 1
-        or what_count >= 2
+        question_starts >= 2
         or "both" in lowered
-        or "also" in lowered
         or "additionally" in lowered
     )
 
@@ -260,6 +264,10 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
             if evicted:
                 router.route(evicted)
 
+            # Flag: did RAG fire this turn? If so, we force the model to
+            # answer from retrieved context instead of calling tools.
+            rag_fired_this_turn = False
+
             # === CONCERN: RAG retrieval for policy questions (Issue #32) ===
             if _is_policy_question(user_text):
                 is_multi = _is_multi_part_question(user_text)
@@ -277,11 +285,13 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                 # Self-RAG already ran inside the RAG functions (relevance +
                 # support checks); we only inject if it passed.
                 rag_injection = (
-                    f"[RETRIEVED POLICY CONTEXT]\n"
+                    f"[RETRIEVED POLICY CONTEXT — ANSWER DIRECTLY FROM THIS, "
+                    f"DO NOT CALL ANY TOOLS]\n"
                     f"{rag_answer}\n"
                     f"[END RETRIEVED POLICY CONTEXT]"
                 )
                 conversation.append({"role": "system", "content": rag_injection})
+                rag_fired_this_turn = True
 
                 # Log for demo/grading visibility
                 hops = rag_result.get("hops_used", 1)
@@ -305,12 +315,17 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                 # Apply Observation Masking to conversation history before completion call
                 pruned_conversation = prepare_pruned_messages(conversation)
 
-                response = groq_client.chat.completions.create(
-                    model=MODEL,
-                    max_tokens=1024,
-                    tools=state["groq_tools"],
-                    messages=pruned_conversation + [memory_msg],
-                )
+                # If RAG fired this turn, do NOT offer tools — force the
+                # model to answer from the retrieved policy context.
+                api_kwargs = {
+                    "model": MODEL,
+                    "max_tokens": 1024,
+                    "messages": pruned_conversation + [memory_msg],
+                }
+                if not rag_fired_this_turn:
+                    api_kwargs["tools"] = state["groq_tools"]
+
+                response = groq_client.chat.completions.create(**api_kwargs)
 
                 message = response.choices[0].message
                 # Groq/OpenAI's assistant message must be echoed back verbatim
@@ -343,6 +358,12 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
                     if message.content:
                         print(f"assistant> {message.content}")
                     break
+
+                # If RAG fired this turn, the model should NOT be calling
+                # tools (we didn't pass them). This is a safety catch.
+                if rag_fired_this_turn:
+                    print("[WARN] Model requested tools despite RAG context — forcing text answer.")
+                    continue
 
                 for tc in message.tool_calls:
                     args = json.loads(tc.function.arguments or "{}")
