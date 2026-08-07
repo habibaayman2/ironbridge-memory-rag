@@ -17,6 +17,7 @@ a second, more specific question instead of guessing or giving up.
 import os
 from dotenv import load_dotenv
 from groq import Groq
+from memory.self_rag_check import SelfRAGChecker
 
 from rag.hybrid_search import HybridRetriever
 
@@ -108,8 +109,22 @@ def agentic_rag_answer(query: str, top_k_per_hop: int = 4) -> dict:
         new_results = [c for c in hop_results if c["text"] not in seen_texts]
         all_retrieved.extend(new_results)
 
+    checker = SelfRAGChecker()
+
+    # نفلتر كل الـ chunks اللي اتجمعوا عبر الـ hops كلها بنفس الـ
+    # relevance check، قبل ما ندّيهم للموديل يجاوب بيهم
+    relevant_chunks = []
+    for c in all_retrieved:
+        check = checker.relevance_check(query, c["text"])
+        c["relevance_check"] = {"passed": check.passed, "reason": check.reason}
+        if check.passed:
+            relevant_chunks.append(c)
+        else:
+            print(f"[self-rag-check] DROPPED chunk (failed relevance): "
+                  f"{c['text'][:80]!r} -- {check.reason}")
+
     final_prompt = FINAL_ANSWER_PROMPT.format(
-        context=_format_retrieved(all_retrieved),
+        context=_format_retrieved(relevant_chunks),
         question=query,
     )
     final_response = groq_client.chat.completions.create(
@@ -118,12 +133,21 @@ def agentic_rag_answer(query: str, top_k_per_hop: int = 4) -> dict:
     )
     answer = final_response.choices[0].message.content
 
+    # هل الإجابة النهائية فعلاً متجذرة في اللي جمعناه عبر كل الـ hops؟
+    combined_content = "\n\n".join(c["text"] for c in relevant_chunks)
+    support = checker.support_check(answer, combined_content) if relevant_chunks else None
+    if support:
+        print(f"[self-rag-check] support_check: passed={support.passed} -- {support.reason}")
+
     return {
         "query": query,
         "answer": answer,
-        "retrieved_chunks": all_retrieved,
+        "retrieved_chunks": relevant_chunks,
         "trace": trace,
         "hops_used": len(trace),
+        "self_rag": {
+            "support_check": {"passed": support.passed, "reason": support.reason} if support else None,
+        },
     }
 
 
