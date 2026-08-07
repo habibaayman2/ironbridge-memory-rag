@@ -126,7 +126,8 @@ def hybrid_rag_answer(query: str, top_k: int = 5) -> dict:
 
 
 if __name__ == "__main__":
-    test_query = "What PPE is required when lifting reinforcement steel above 50kg?"
+   if __name__ == "__main__":
+    test_query = "What does IronBridge Safety Policy #1 cover?"
     result = hybrid_rag_answer(test_query)
     print(f"\nQuery: {result['query']}")
     print(f"\nAnswer:\n{result['answer']}")
