@@ -16,7 +16,7 @@ import shutil
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SOURCE_DIR = REPO_ROOT / "mcp_server"
+SOURCE_DIR = REPO_ROOT / "mcp_server" / "policies"
 DEST_DIR = REPO_ROOT / "rag" / "policies"
 
 # The three policy documents currently exposed as MCP resources in
