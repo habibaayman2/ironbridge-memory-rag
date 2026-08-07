@@ -7,7 +7,7 @@ The MCP server itself, built on the `mcp` Python SDK's FastMCP API.
 - **`db.py`** — SQLite access layer; all database reads/writes go through here
 - **`validation.py`** — server-side business-rule validation and role-based authorization, independent of the tool schemas
 - **`http_app.py`** — Streamable HTTP transport wiring for production deployment
-- **`policies/`** — two safety-policy documents exposed to the model as resources, not tools
+- **`policies/`** — three safety-policy documents (Material Handling Procedures, Warehouse Safety Regulations, Equipment Operation Safety Rules) exposed to the model as resources, not tools
 
 ## Run
 
