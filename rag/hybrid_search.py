@@ -15,6 +15,7 @@ import os
 from rank_bm25 import BM25Okapi
 from groq import Groq
 from dotenv import load_dotenv 
+from memory.self_rag_check import SelfRAGChecker
 
 from rag.chunking import get_policy_chunks
 from rag.vector_store import setup_vector_store
@@ -113,15 +114,50 @@ def generate_answer(query: str, retrieved_chunks: list[dict]) -> str:
 
 
 def hybrid_rag_answer(query: str, top_k: int = 5) -> dict:
-    """Full pipeline: hybrid retrieve, then generate. Returns answer +
-    the chunks it was grounded in, for later Self-RAG verification."""
+    """Full pipeline: hybrid retrieve, then generate, then verify with
+    Person 1's Self-RAG checker before the answer is considered final.
+    Both checks are logged with a visible pass/fail, not silently
+    trusted."""
     retriever = HybridRetriever()
     retrieved = retriever.search(query, top_k=top_k)
-    answer = generate_answer(query, retrieved)
+
+    checker = SelfRAGChecker()
+
+    # 1. هل الـ chunks اللي جبناها فعلاً relevant للسؤال؟
+    relevant_chunks = []
+    for c in retrieved:
+        check = checker.relevance_check(query, c["text"])
+        c["relevance_check"] = {"passed": check.passed, "reason": check.reason}
+        if check.passed:
+            relevant_chunks.append(c)
+        else:
+            print(f"[self-rag-check] DROPPED chunk (failed relevance): "
+                  f"{c['text'][:80]!r} -- {check.reason}")
+
+    # لو كل الـ chunks فشلوا، منقدرش نجاوب من غير مصدر حقيقي
+    if not relevant_chunks:
+        return {
+            "query": query,
+            "answer": "No relevant policy content was found for this question.",
+            "retrieved_chunks": retrieved,
+            "self_rag": {"relevance_passed": False, "support_check": None},
+        }
+
+    answer = generate_answer(query, relevant_chunks)
+
+    # 2. هل الإجابة فعلاً مبنية على الـ chunks دي، ولا الموديل اخترع حاجة؟
+    combined_content = "\n\n".join(c["text"] for c in relevant_chunks)
+    support = checker.support_check(answer, combined_content)
+    print(f"[self-rag-check] support_check: passed={support.passed} -- {support.reason}")
+
     return {
         "query": query,
         "answer": answer,
-        "retrieved_chunks": retrieved,
+        "retrieved_chunks": relevant_chunks,
+        "self_rag": {
+            "relevance_passed": True,
+            "support_check": {"passed": support.passed, "reason": support.reason},
+        },
     }
 
 
