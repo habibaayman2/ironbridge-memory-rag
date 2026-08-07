@@ -221,3 +221,10 @@ python agent/agent.py
 python -m context_eval.evaluate
 python -m retrieval_eval.evaluate
 ```
+# ADD DIMO VIDEO
+
+https://github.com/user-attachments/assets/73f33f8d-0fc1-4a46-86ac-405477466a5e
+
+
+
+
