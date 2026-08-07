@@ -110,17 +110,3 @@ keeps the first several turns fully verbatim regardless of content.
 **Shipped strategy: `observation_masking`.** It matches IronBridge's
 actual bloat source, ties for best accuracy, and is the only one of
 the three winners that adds zero extra model calls to do its job.
-
-## Notes on portability
-
-Every module in this folder resolves its own imports via a small
-`sys.path` bootstrap at the top of the file (see e.g.
-`sliding_window.py`), so each file works correctly whether it's:
-
-- imported as part of the `context_eval` package (`python -m context_eval.evaluate`),
-- run directly as a standalone script, or
-- imported from an unrelated working directory.
-
-`test_cases/generator.py` additionally adds the project root to
-`sys.path` so it can pull real tool-output data from `mcp_server.db`
-for the test transcripts.
