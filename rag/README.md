@@ -62,7 +62,7 @@ python rag/test_search.py
 - [x] Section-aware chunking
 - [x] Local Qdrant vector database
 - [x] Metadata payload indexing
-- [ ] Hybrid Search (Vector + BM25)
-- [ ] Agentic RAG
+- [x] Hybrid Search (Vector + BM25)
+- [x] Agentic RAG
 - [ ] Self-RAG verification (integration with Person 1)
 - [ ] `retrieval_eval/` benchmark and comparison table
