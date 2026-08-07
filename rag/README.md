@@ -72,7 +72,7 @@ A clean, minimalist implementation of Naive RAG designed for quick context retri
 
 ---
 
-## 🏗️ Architecture / Pipeline Flow
+## Architecture / Pipeline Flow
 [ Documents ] ──> [ Chunking ] ──> [ Embedding ] ──> [ Vector Store ]
 │
 [ User Query ] ──> [ Embedding ] ──> [ Similarity Search ] ┘
@@ -84,7 +84,7 @@ A clean, minimalist implementation of Naive RAG designed for quick context retri
 
 ---
 
-## 🚀 Features
+## Features
 
 * **FastEmbed Acceleration:** Local, high-performance ONNX embeddings with automatic model caching.
 * **Vector Index Persistence:** Reuses existing collection indices to skip redundant re-embedding.
@@ -93,7 +93,7 @@ A clean, minimalist implementation of Naive RAG designed for quick context retri
 
 ---
 
-## 📊 Benchmark Results
+## Benchmark Results
 
 Below are the execution logs and Self-RAG verification results from a sample query run:
 
