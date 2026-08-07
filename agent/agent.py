@@ -40,7 +40,13 @@ sys.path.insert(0, os.path.dirname(__file__))
 import mcp_client
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO_ROOT)  # so `import memory` works regardless of cwd
+CONTEXT_EVAL_DIR = os.path.join(REPO_ROOT, "context_eval")
+
+# Configure sys.path for direct modular imports across repository folders
+for path in (REPO_ROOT, CONTEXT_EVAL_DIR):
+    if path not in sys.path:
+        sys.path.insert(0, path)
+
 load_dotenv(os.path.join(REPO_ROOT, ".env"))  # picks up GROQ_API_KEY,
                                                 # IRONBRIDGE_MCP_URL, etc. if
                                                 # a .env file exists there;
@@ -52,6 +58,16 @@ from memory.router import PromoteOrDropRouter
 from memory.stores import EpisodicStore, SemanticStore
 from memory.consolidation import ConsolidationJob
 from memory.self_rag_check import SelfRAGChecker
+
+# ---------------------------------------------------------------------------
+# Context Management Integration (Observation Masking Strategy)
+# ---------------------------------------------------------------------------
+try:
+    from observation_masking import apply as apply_observation_masking
+    from transcript import Turn
+except ModuleNotFoundError:
+    from context_eval.observation_masking import apply as apply_observation_masking
+    from context_eval.transcript import Turn
 
 MODEL = "llama-3.3-70b-versatile"
 
@@ -74,6 +90,42 @@ def mcp_tool_to_groq(tool) -> dict:
             "parameters": tool.inputSchema,
         },
     }
+
+
+def prepare_pruned_messages(messages: list[dict], keep_last_n_tool_outputs: int = 3) -> list[dict]:
+    """
+    Applies Observation Masking to the active conversation history prior to model dispatch.
+    Replaces older verbose JSON tool observations with concise placeholders while preserving structure.
+    """
+    turns = []
+    for idx, msg in enumerate(messages):
+        role = msg.get("role")
+        content = msg.get("content") or ""
+        is_tool = (role == "tool")
+        is_critical = any(kw in content.lower() for kw in ["budget", "limit", "cap", "rule"])
+        
+        turns.append(
+            Turn(
+                role=role,
+                content=content,
+                is_tool_output=is_tool,
+                critical=is_critical,
+                turn_index=idx,
+            )
+        )
+
+    # 1. Apply Observation Masking strategy on transcript turns
+    pruned_turns = apply_observation_masking(turns, keep_last_n_tool_outputs=keep_last_n_tool_outputs)
+
+    # 2. Map masked contents back to message dict payloads for API execution
+    pruned_messages = []
+    for orig_msg, pruned_turn in zip(messages, pruned_turns):
+        msg_copy = dict(orig_msg)
+        if orig_msg.get("role") == "tool":
+            msg_copy["content"] = pruned_turn.content
+        pruned_messages.append(msg_copy)
+
+    return pruned_messages
 
 
 async def run_agent(transport: str, http_url: str | None, http_token: str | None):
@@ -173,11 +225,14 @@ async def run_agent(transport: str, http_url: str | None, http_token: str | None
 
             # Loop until the model stops asking for tool calls.
             while True:
+                # Apply Observation Masking to conversation history before completion call
+                pruned_conversation = prepare_pruned_messages(conversation)
+
                 response = groq_client.chat.completions.create(
                     model=MODEL,
                     max_tokens=1024,
                     tools=state["groq_tools"],
-                    messages=conversation + [memory_msg],
+                    messages=pruned_conversation + [memory_msg],
                 )
 
                 message = response.choices[0].message
